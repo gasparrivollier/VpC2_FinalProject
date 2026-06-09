@@ -8,5 +8,8 @@ wheels/
 dataset_stft/**
 dataset_wavelet/**
 
+/models
+/dataset_wavelet
+
 # Virtual environments
 .venv

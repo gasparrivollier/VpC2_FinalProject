@@ -1,0 +1,5 @@
+Modelo,Repr,Test Acc (%),Bal-Acc (%),F1-macro,Params
+RESNET,STFT,62.33,37.43,0.3692,"11,242,563"
+RESNET,Wavelet,51.24,30.42,0.3048,"11,242,563"
+CNN,STFT,25.24,36.42,0.2425,"1,453,219"
+CNN,Wavelet,16.63,38.0,0.167,"1,453,219"

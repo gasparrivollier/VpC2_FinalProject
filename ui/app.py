@@ -1,37 +1,76 @@
 """
-SpectraTrade — option B (split layout) in Streamlit
-===================================================
-Left sidebar  = controls rail   (ticker search · market · period · Run)
-Main area     = results          (price chart | spectrogram, then verdict + confidence)
+SpectraTrade — Streamlit demo (modelo real conectado)
+=====================================================
+Left sidebar  = controles   (mercado · ticker · horizonte · Run)
+Main area     = resultados   (precio | espectrograma, luego veredicto + confianza)
 
-This is a working scaffold:
-  • fetches price history (yfinance; falls back to a synthetic random walk offline)
-  • computes a frequency spectrogram from the price series (scipy)
-  • renders that spectrogram as the image you feed your CV model
-  • calls predict_from_spectrogram(...) — plug your model in there
+Pipeline (idéntico al de entrenamiento, ver proyecto_final_resultados.ipynb):
+  1. descarga precios (yfinance)
+  2. log-returns -> z-score sobre ventana de 60 días
+  3. STFT (Hann 32, overlap 28, nfft 64) -> dB -> magma -> flip -> 64x64
+  4. ResNet-STFT entrenado -> BUY / HOLD / SELL + confianza
 
-Run:  streamlit run app.py
+Si no encuentra el .pth, cae a un stub aleatorio para que la UI igual demuestre.
+
+Run:  streamlit run ui/app.py
 """
 
 import io
+import os
 import numpy as np
 import streamlit as st
 from scipy import signal
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+from PIL import Image
 
 try:
     import yfinance as yf
 except ImportError:
     yf = None
 
+try:
+    import pywt
+    PYWT_OK = True
+except ImportError:
+    PYWT_OK = False
 
-# ── page + theme ────────────────────────────────────────────────────────────
+try:
+    import torch
+    import torch.nn as nn
+    from torchvision import models, transforms
+    TORCH_OK = True
+except ImportError:
+    TORCH_OK = False
+
+
+# ── configuración del modelo (debe coincidir con el entrenamiento) ────────────
+CLASSES     = ["BUY", "HOLD", "SELL"]      # orden alfabético, igual que en el notebook
+WINDOW_DAYS = 60
+IMG_SIZE    = 64
+CMAP        = "magma"
+PAD_LENGTH  = 16
+STFT_CFG    = {"stft_window": 32, "stft_overlap": 28, "nfft": 64}
+WAVELET_CFG = {"wavelet": "cmor1.5-1.0", "scales": list(range(2, 31))}
+
+_HERE       = os.path.dirname(os.path.abspath(__file__))
+_MODELS_DIR = os.path.join(_HERE, "..", "models")
+
+# modelos disponibles en la UI: nombre -> (archivo, representación)
+MODEL_OPTIONS = {
+    "ResNet · STFT":    ("model_RESNET-STFT.pth",    "STFT"),
+    "ResNet · Wavelet": ("model_RESNET-Wavelet.pth", "Wavelet"),
+}
+
+
+# ── page + theme ──────────────────────────────────────────────────────────────
 st.set_page_config(page_title="SpectraTrade", page_icon="✶", layout="wide")
 
 ACCENT = "#2a93a8"
-UP, DOWN, HOLD = "#2e9e6b", "#d65a45", "#caa23c"
+UP, DOWN, HOLD = "#2e9e6b", "#d65a45", "#caa23c"   # BUY, SELL, HOLD
+CLR = {"BUY": UP, "SELL": DOWN, "HOLD": HOLD}
 
 st.markdown(f"""
 <style>
@@ -48,163 +87,207 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 
-# ── helpers ─────────────────────────────────────────────────────────────────
-PERIOD_MAP = {  # preset -> (yf period, yf interval, human horizon)
-    "1D": ("1d", "5m", "next 1 day"),
-    "1W": ("5d", "30m", "next 1 week"),
-    "1M": ("1mo", "1h", "next 1 month"),
+# ── modelo: ResNet18 con cabeza custom (idéntica a ResNetFinancial) ───────────
+def _build_resnet(num_classes=3):
+    base = models.resnet18(weights=None)
+    in_f = base.fc.in_features
+    base.fc = nn.Sequential(
+        nn.Linear(in_f, 128), nn.ReLU(), nn.Dropout(0.55),
+        nn.Linear(128, num_classes),
+    )
+    return base
+
+
+@st.cache_resource(show_spinner=False)
+def load_model(filename: str):
+    """Carga un ResNet entrenado por nombre de archivo. Devuelve (model, ok)."""
+    path = os.path.join(_MODELS_DIR, filename)
+    if not TORCH_OK or not os.path.exists(path):
+        return None, False
+    try:
+        model = _build_resnet(len(CLASSES))
+        state = torch.load(path, map_location="cpu")
+        # run_experiment guardó base.fc bajo el wrapper ResNetFinancial -> 'model.'
+        state = {k.replace("model.", "", 1) if k.startswith("model.") else k: v
+                 for k, v in state.items()}
+        model.load_state_dict(state, strict=True)
+        model.eval()
+        return model, True
+    except Exception as e:
+        st.sidebar.warning(f"No se pudo cargar el modelo: {e}")
+        return None, False
+
+
+_EVAL_TF = (transforms.Compose([
+    transforms.Resize((IMG_SIZE, IMG_SIZE)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+]) if TORCH_OK else None)
+
+
+# ── helpers ───────────────────────────────────────────────────────────────────
+PERIOD_MAP = {  # horizonte de predicción -> días de descarga
+    "7d":  "next 7 days",
+    "15d": "next 15 days",
+    "30d": "next 30 days",
 }
 
 @st.cache_data(show_spinner=False)
-def load_prices(ticker: str, period: str, interval: str) -> np.ndarray:
-    """Return a 1-D close-price array. Falls back to a synthetic series offline."""
+def load_prices(ticker: str) -> np.ndarray:
+    """Cierres diarios (>= 90 días). Cae a random walk si yfinance falla."""
     if yf is not None and ticker:
         try:
-            df = yf.download(ticker, period=period, interval=interval,
+            df = yf.download(ticker, period="6mo", interval="1d",
                              progress=False, auto_adjust=True)
             closes = df["Close"].dropna().to_numpy().ravel()
-            if closes.size >= 32:
+            if closes.size >= WINDOW_DAYS + 1:
                 return closes
         except Exception:
             pass
-    # offline / failed fetch → deterministic random walk so the UI still demos
-    rng = np.random.default_rng(abs(hash((ticker, period))) % 2**32)
+    rng = np.random.default_rng(abs(hash(ticker)) % 2**32)
     steps = rng.normal(0, 1, 240).cumsum()
     return 100 + steps - steps.min()
 
 
-def make_spectrogram(prices: np.ndarray):
-    """Compute a spectrogram of price returns and render it to a PNG (the CV input)."""
+def make_stft_matrix(prices: np.ndarray) -> np.ndarray:
+    """Replica make_stft_image() del notebook: z-score de log-returns -> STFT dB."""
     returns = np.diff(np.log(prices + 1e-9))
-    nper = max(16, min(64, returns.size // 4))
-    f, t, Sxx = signal.spectrogram(returns, nperseg=nper, noverlap=nper // 2)
-    Sxx = 10 * np.log10(Sxx + 1e-12)
+    window  = returns[-WINDOW_DAYS:]
+    std = window.std()
+    window = (window - window.mean()) / std if std > 1e-10 else np.zeros_like(window)
 
-    fig, ax = plt.subplots(figsize=(4.2, 3.0), dpi=110)
-    ax.pcolormesh(t, f, Sxx, shading="gouraud", cmap="magma")
-    ax.axis("off")
-    fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", bbox_inches="tight", pad_inches=0)
-    plt.close(fig)
-    buf.seek(0)
-    return buf, Sxx
-
-
-def predict_from_spectrogram(spectrogram_array: np.ndarray, ticker: str):
-    """
-    >>> PLUG YOUR CV MODEL HERE <<<
-    Take the spectrogram image/array, return (label, confidence_0_to_1).
-
-        model = load_model(...)
-        logits = model(preprocess(spectrogram_array))
-        idx = logits.argmax(); return CLASSES[idx], float(softmax(logits)[idx])
-
-    The stub below is deterministic so the app runs end-to-end without a model.
-    """
-    rng = np.random.default_rng(abs(hash(ticker)) % 2**32)
-    label = rng.choice(["UP", "DOWN", "HOLD"], p=[0.45, 0.3, 0.25])
-    conf = float(rng.uniform(0.55, 0.85))
-    return label, conf
+    padded = np.pad(window, (0, PAD_LENGTH), mode="reflect")
+    _, _, Sxx = signal.spectrogram(
+        padded, fs=1.0,
+        window=signal.windows.hann(STFT_CFG["stft_window"]),
+        noverlap=STFT_CFG["stft_overlap"],
+        nfft=STFT_CFG["nfft"], scaling="density",
+    )
+    n_cols = (WINDOW_DAYS - STFT_CFG["stft_window"]) // (
+        STFT_CFG["stft_window"] - STFT_CFG["stft_overlap"]) + 1
+    return 10 * np.log10(Sxx[:, :n_cols] + 1e-12)
 
 
-# ── ticker options by market ─────────────────────────────────────────────────
+def make_wavelet_matrix(prices: np.ndarray) -> np.ndarray:
+    """Replica make_wavelet_image(): CWT Morlet (cmor1.5-1.0) sobre z-score -> dB."""
+    returns = np.diff(np.log(prices + 1e-9))
+    window  = returns[-WINDOW_DAYS:]
+    std = window.std()
+    window = (window - window.mean()) / std if std > 1e-10 else np.zeros_like(window)
+
+    padded = np.pad(window, (0, PAD_LENGTH), mode="reflect")
+    scales = np.array(WAVELET_CFG["scales"], dtype=float)
+    coeffs, _ = pywt.cwt(padded, scales, WAVELET_CFG["wavelet"], sampling_period=1.0)
+    power = np.abs(coeffs) ** 2
+    power = power[:, :WINDOW_DAYS]
+    return 10 * np.log10(power + 1e-12)
+
+
+def make_matrix(prices: np.ndarray, repr_name: str) -> np.ndarray:
+    if repr_name == "Wavelet":
+        return make_wavelet_matrix(prices)
+    return make_stft_matrix(prices)
+
+
+def matrix_to_png(matrix: np.ndarray) -> Image.Image:
+    """Misma conversión que save_png(): normaliza, magma, flip vertical, 64x64."""
+    vmin, vmax = matrix.min(), matrix.max()
+    norm = (matrix - vmin) / (vmax - vmin + 1e-10)
+    rgb  = (cm.get_cmap(CMAP)(norm)[:, :, :3] * 255).astype(np.uint8)[::-1]
+    return Image.fromarray(rgb).resize((IMG_SIZE, IMG_SIZE), Image.BILINEAR)
+
+
+def predict(prices: np.ndarray, model, model_ok: bool, repr_name: str):
+    """Devuelve (label, confianza, probs_dict, imagen_PIL)."""
+    matrix = make_matrix(prices, repr_name)
+    img    = matrix_to_png(matrix)
+
+    if model_ok and model is not None:
+        x = _EVAL_TF(img.convert("RGB")).unsqueeze(0)
+        with torch.no_grad():
+            probs = torch.softmax(model(x), dim=1).numpy()[0]
+        idx = int(probs.argmax())
+        return CLASSES[idx], float(probs[idx]), dict(zip(CLASSES, probs.tolist())), img
+
+    # fallback stub
+    rng = np.random.default_rng(int(abs(matrix.sum())) % 2**32)
+    p = rng.dirichlet([1, 1, 1])
+    idx = int(p.argmax())
+    return CLASSES[idx], float(p[idx]), dict(zip(CLASSES, p.tolist())), img
+
+
+# ── ticker options by market ──────────────────────────────────────────────────
 TICKER_MAP = {
-    "Stocks": {
-        "AAPL — Apple": "AAPL",
-        "MSFT — Microsoft": "MSFT",
-        "GOOGL — Alphabet (Google)": "GOOGL",
-        "AMZN — Amazon": "AMZN",
-        "NVDA — Nvidia": "NVDA",
-        "META — Meta (Facebook)": "META",
-        "TSLA — Tesla": "TSLA",
-        "JPM — JPMorgan Chase": "JPM",
-        "V — Visa": "V",
-        "JNJ — Johnson & Johnson": "JNJ",
-        "WMT — Walmart": "WMT",
-        "PG — Procter & Gamble": "PG",
-        "XOM — ExxonMobil": "XOM",
-        "BAC — Bank of America": "BAC",
-        "DIS — Disney": "DIS",
-    },
     "Crypto": {
-        "BTC — Bitcoin": "BTC-USD",
-        "ETH — Ethereum": "ETH-USD",
-        "BNB — Binance Coin": "BNB-USD",
+        "BTC — Bitcoin": "BTC-USD", "ETH — Ethereum": "ETH-USD",
         "SOL — Solana": "SOL-USD",
-        "XRP — Ripple": "XRP-USD",
-        "ADA — Cardano": "ADA-USD",
-        "DOGE — Dogecoin": "DOGE-USD",
-        "AVAX — Avalanche": "AVAX-USD",
-        "DOT — Polkadot": "DOT-USD",
-        "MATIC — Polygon": "MATIC-USD",
     },
-    "FX": {
-        "EUR/USD — Euro / US Dollar": "EURUSD=X",
-        "GBP/USD — British Pound / US Dollar": "GBPUSD=X",
-        "USD/JPY — US Dollar / Japanese Yen": "USDJPY=X",
-        "AUD/USD — Australian Dollar / US Dollar": "AUDUSD=X",
-        "USD/CAD — US Dollar / Canadian Dollar": "USDCAD=X",
-        "USD/CHF — US Dollar / Swiss Franc": "USDCHF=X",
-        "NZD/USD — New Zealand Dollar / US Dollar": "NZDUSD=X",
-        "EUR/GBP — Euro / British Pound": "EURGBP=X",
-        "EUR/JPY — Euro / Japanese Yen": "EURJPY=X",
-        "GBP/JPY — British Pound / Japanese Yen": "GBPJPY=X",
+    "Stocks": {
+        "AAPL — Apple": "AAPL", "MSFT — Microsoft": "MSFT",
+        "GOOGL — Alphabet": "GOOGL", "AMZN — Amazon": "AMZN",
+        "NVDA — Nvidia": "NVDA", "META — Meta": "META",
+        "TSLA — Tesla": "TSLA", "SPY — S&P 500 ETF": "SPY",
     },
     "Commodities": {
-        "GC — Gold": "GC=F",
-        "SI — Silver": "SI=F",
-        "CL — Crude Oil": "CL=F",
-        "NG — Natural Gas": "NG=F",
-        "HG — Copper": "HG=F",
-        "PL — Platinum": "PL=F",
-        "PA — Palladium": "PA=F",
-        "ZC — Corn": "ZC=F",
-        "ZW — Wheat": "ZW=F",
-        "ZS — Soybeans": "ZS=F",
+        "GC — Gold": "GC=F", "SI — Silver": "SI=F",
+    },
+    "FX": {
+        "EUR/USD": "EURUSD=X", "GBP/USD": "GBPUSD=X",
     },
 }
 
-# ── sidebar = controls ──────────────────────────────────────────────────────
+# ── sidebar = controles ───────────────────────────────────────────────────────
 with st.sidebar:
+    st.markdown('<div class="mono">modelo</div>', unsafe_allow_html=True)
+    model_label = st.radio("Modelo", list(MODEL_OPTIONS.keys()),
+                           label_visibility="collapsed")
+    model_file, repr_name = MODEL_OPTIONS[model_label]
+    model, model_ok = load_model(model_file)
+    if model_ok:
+        st.success(f"{model_label} cargado ✓")
+    else:
+        st.error("Stub (sin modelo)")
+        st.caption(f"Falta `models/{model_file}`.")
+
     st.markdown('<div class="mono">market</div>', unsafe_allow_html=True)
-    market = st.pills("Market", ["Stocks", "Crypto", "FX", "Commodities"],
-                      default="Crypto", label_visibility="collapsed")
+    market = st.pills("Market", list(TICKER_MAP.keys()),
+                      default="Crypto", label_visibility="collapsed") or "Crypto"
 
     st.markdown('<div class="mono">ticker</div>', unsafe_allow_html=True)
-    market = market or "Crypto"
-    options = list(TICKER_MAP[market].keys())
+    options   = list(TICKER_MAP[market].keys())
     selection = st.selectbox("Ticker", options, label_visibility="collapsed")
-    ticker = TICKER_MAP[market][selection]
+    ticker    = TICKER_MAP[market][selection]
 
-    st.markdown('<div class="mono">prediction period</div>', unsafe_allow_html=True)
-    period_key = st.segmented_control("Period", list(PERIOD_MAP.keys()),
-                                      default="1W", label_visibility="collapsed")
+    st.markdown('<div class="mono">horizonte de predicción</div>', unsafe_allow_html=True)
+    period_key = st.segmented_control("Horizonte", list(PERIOD_MAP.keys()),
+                                      default="7d", label_visibility="collapsed") or "7d"
 
     run = st.button("⚡ Run prediction", type="primary", use_container_width=True)
 
 
-# ── main area = results ─────────────────────────────────────────────────────
-period_key = period_key or "1W"
-yf_period, yf_interval, horizon = PERIOD_MAP[period_key]
-prices = load_prices(ticker, yf_period, yf_interval)
-spec_png, spec_arr = make_spectrogram(prices)
-label, conf = predict_from_spectrogram(spec_arr, ticker or "—")
+# ── main area = resultados ────────────────────────────────────────────────────
+horizon = PERIOD_MAP[period_key]
+prices  = load_prices(ticker)
+label, conf, probs, img = predict(prices, model, model_ok, repr_name)
 
-st.markdown(f"### {selection}  ·  <span class='mono'>{horizon}</span>", unsafe_allow_html=True)
+st.markdown(f"### {selection}  ·  <span class='mono'>{horizon}</span>",
+            unsafe_allow_html=True)
 
 col_chart, col_spec = st.columns([0.55, 0.45])
 with col_chart:
-    st.markdown('<div class="mono">price history</div>', unsafe_allow_html=True)
-    st.line_chart(prices, height=240, color=ACCENT)
+    st.markdown('<div class="mono">price history (últimos 60 días)</div>',
+                unsafe_allow_html=True)
+    st.line_chart(prices[-WINDOW_DAYS:], height=240, color=ACCENT)
 with col_spec:
-    st.markdown('<div class="mono">spectrogram · CV model input</div>', unsafe_allow_html=True)
-    st.image(spec_png, width="stretch")
+    rep_lbl = "escalograma Wavelet" if repr_name == "Wavelet" else "espectrograma STFT"
+    st.markdown(f'<div class="mono">{rep_lbl} · input del modelo</div>',
+                unsafe_allow_html=True)
+    st.image(img, width="stretch")
 
 st.write("")
-color = {"UP": UP, "DOWN": DOWN, "HOLD": HOLD}[label]
-arrow = {"UP": "↑", "DOWN": "↓", "HOLD": "→"}[label]
-txt = {"UP": "LIKELY UP", "DOWN": "LIKELY DOWN", "HOLD": "HOLD"}[label]
+color = CLR[label]
+arrow = {"BUY": "↑", "SELL": "↓", "HOLD": "→"}[label]
+txt   = {"BUY": "BUY", "SELL": "SELL", "HOLD": "HOLD"}[label]
 
 v_left, v_right = st.columns([0.6, 0.4])
 with v_left:
@@ -213,13 +296,21 @@ with v_left:
            display:flex;gap:18px;align-items:center;">
         <div class="arrow" style="color:{color}">{arrow}</div>
         <div>
-          <div class="mono">prediction · {horizon}</div>
+          <div class="mono">señal · {horizon}</div>
           <div class="verdict" style="color:{color}">{txt}</div>
         </div>
       </div>
     """, unsafe_allow_html=True)
 with v_right:
-    st.markdown('<div class="mono">confidence</div>', unsafe_allow_html=True)
-    st.markdown(f"<div style='font-size:40px;font-weight:800;color:{color}'>{conf*100:.0f}%</div>",
-                unsafe_allow_html=True)
+    st.markdown('<div class="mono">confianza</div>', unsafe_allow_html=True)
+    st.markdown(f"<div style='font-size:40px;font-weight:800;color:{color}'>"
+                f"{conf*100:.0f}%</div>", unsafe_allow_html=True)
     st.progress(conf)
+
+# desglose por clase
+st.write("")
+st.markdown('<div class="mono">probabilidades por clase</div>', unsafe_allow_html=True)
+pc = st.columns(len(CLASSES))
+for c, cls in zip(pc, CLASSES):
+    with c:
+        st.metric(cls, f"{probs[cls]*100:.1f}%")
