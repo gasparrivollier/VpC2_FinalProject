@@ -82,7 +82,44 @@ st.markdown(f"""
            letter-spacing: .06em; text-transform: uppercase; color: #7a766d; }}
   .verdict {{ font-size: 44px; font-weight: 800; line-height: 1; }}
   .arrow {{ font-size: 60px; line-height: 1; }}
+
+  /* ── sidebar: paleta unificada sobre crema con acento teal ───────────── */
+  /* radio (modelo) */
+  section[data-testid="stSidebar"] [role="radiogroup"] label p {{
+      color: #3a3730; font-weight: 600; }}
+  section[data-testid="stSidebar"] [role="radiogroup"] [data-baseweb="radio"] div:first-child {{
+      border-color: {ACCENT}; }}
+
+  /* pills (market) y segmented_control (horizonte): mismo look pill teal */
+  section[data-testid="stSidebar"] button[kind="pills"],
+  section[data-testid="stSidebar"] button[kind="pillsActive"],
+  section[data-testid="stSidebar"] button[kind="segmentedControl"],
+  section[data-testid="stSidebar"] button[kind="segmentedControlActive"] {{
+      border-radius: 999px; font-weight: 600; border: 1px solid {ACCENT}55;
+      background: #fbfaf5; color: #3a3730; transition: all .12s ease; }}
+  section[data-testid="stSidebar"] button[kind="pills"]:hover,
+  section[data-testid="stSidebar"] button[kind="segmentedControl"]:hover {{
+      border-color: {ACCENT}; color: {ACCENT}; background: {ACCENT}11; }}
+  /* estado seleccionado: relleno teal sólido */
+  section[data-testid="stSidebar"] button[kind="pillsActive"],
+  section[data-testid="stSidebar"] button[kind="segmentedControlActive"] {{
+      background: {ACCENT}; border-color: {ACCENT}; color: #ffffff; }}
+  section[data-testid="stSidebar"] button[kind="pillsActive"] p,
+  section[data-testid="stSidebar"] button[kind="segmentedControlActive"] p {{
+      color: #ffffff; }}
+
+  /* selectbox (ticker): borde teal, fondo claro, texto negro */
+  section[data-testid="stSidebar"] [data-baseweb="select"] > div {{
+      background: #fbfaf5; border-color: {ACCENT}55; border-radius: 10px; }}
+  section[data-testid="stSidebar"] [data-baseweb="select"] div {{
+      color: #000000; }}
+
+  /* botón Run: acento teal en vez del coral por defecto */
   .stButton>button {{ border-radius: 12px; font-weight: 700; }}
+  section[data-testid="stSidebar"] .stButton>button[kind="primary"] {{
+      background: {ACCENT}; border-color: {ACCENT}; color: #ffffff; }}
+  section[data-testid="stSidebar"] .stButton>button[kind="primary"]:hover {{
+      background: #237c8e; border-color: #237c8e; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -267,8 +304,26 @@ with st.sidebar:
 
 # ── main area = resultados ────────────────────────────────────────────────────
 horizon = PERIOD_MAP[period_key]
-prices  = load_prices(ticker)
-label, conf, probs, img = predict(prices, model, model_ok, repr_name)
+
+# La predicción solo se dispara al apretar "Run prediction"; el resultado se
+# guarda en session_state para sobrevivir a los reruns de Streamlit.
+if run:
+    prices = load_prices(ticker)
+    label, conf, probs, img = predict(prices, model, model_ok, repr_name)
+    st.session_state["result"] = {
+        "selection": selection, "horizon": horizon, "prices": prices,
+        "label": label, "conf": conf, "probs": probs, "img": img,
+    }
+
+if "result" not in st.session_state:
+    st.info("Elegí mercado, ticker y horizonte, luego apretá **⚡ Run prediction**.")
+    st.stop()
+
+res       = st.session_state["result"]
+selection = res["selection"]
+horizon   = res["horizon"]
+prices    = res["prices"]
+label, conf, probs, img = res["label"], res["conf"], res["probs"], res["img"]
 
 st.markdown(f"### {selection}  ·  <span class='mono'>{horizon}</span>",
             unsafe_allow_html=True)
