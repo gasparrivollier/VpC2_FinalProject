@@ -299,9 +299,7 @@ _EVAL_TF = (transforms.Compose([
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 PERIOD_MAP = {  # horizonte de predicción -> días de descarga
-    "7d":  "next 7 days",
     "15d": "next 15 days",
-    "30d": "next 30 days",
 }
 
 @st.cache_data(show_spinner=False)
@@ -446,7 +444,7 @@ with st.sidebar:
 
     st.markdown('<div class="mono">horizonte de predicción</div>', unsafe_allow_html=True)
     period_key = st.segmented_control("Horizonte", list(PERIOD_MAP.keys()),
-                                      default="30d", label_visibility="collapsed") or "30d"
+                                      default="15d", label_visibility="collapsed") or "15d"
 
     st.markdown('<div class="mono">test retrospectivo</div>', unsafe_allow_html=True)
     test_mode = st.checkbox("Simular predicción en fecha pasada", value=False,
@@ -462,6 +460,7 @@ with st.sidebar:
 
 # ── main area = resultados ────────────────────────────────────────────────────
 horizon = PERIOD_MAP[period_key]
+horizon_days = int(period_key.replace("d", ""))
 
 # La predicción solo se dispara al apretar "Run prediction"; el resultado se
 # guarda en session_state para sobrevivir a los reruns de Streamlit.
@@ -484,8 +483,8 @@ if run:
             st.error(f"❌ Necesitamos al menos {WINDOW_DAYS} días previos a la fecha de test")
             st.stop()
         
-        if date_idx + 30 > len(closes):  # 30 días de horizonte mínimo
-            st.error("❌ Necesitamos al menos 30 días de datos después de la fecha de test")
+        if date_idx + horizon_days > len(closes):
+            st.error(f"❌ Necesitamos al menos {horizon_days} días de datos después de la fecha de test")
             st.stop()
         
         # Extraer precios: 90 días previos para hacer la predicción
@@ -494,12 +493,12 @@ if run:
         
         # Datos para visualización:
         # - histórico: últimos 90 días antes de test_date
-        # - predicción: los 30 días que el modelo predice
-        # - realidad: los datos reales de esos 30 días
+        # - predicción: los días que marca el horizonte
+        # - realidad: los datos reales de ese horizonte
         hist_prices = closes[date_idx - WINDOW_DAYS:date_idx]
-        real_prices = closes[date_idx:date_idx + 30]
+        real_prices = closes[date_idx:date_idx + horizon_days]
         hist_dates = dates[date_idx - WINDOW_DAYS:date_idx]
-        real_dates = dates[date_idx:date_idx + 30]
+        real_dates = dates[date_idx:date_idx + horizon_days]
         
         st.session_state["result"] = {
             "selection": selection, "horizon": horizon, "prices": prices_for_pred,
@@ -556,7 +555,7 @@ with col_chart:
         # Realidad: línea azul/verde (coloreada por si subió o bajó)
         real_color = UP if real_prices[-1] > hist_prices[-1] else DOWN
         ax.plot(range(len(hist_prices), len(hist_prices) + len(real_prices)), real_prices,
-                label=f"Realidad (30d)", color=real_color, linewidth=2, marker="o", markersize=3)
+            label=f"Realidad ({horizon_days}d)", color=real_color, linewidth=2, marker="o", markersize=3)
         
         # Línea vertical separadora
         ax.axvline(x=len(hist_prices) - 0.5, color="#ccc", linestyle="--", linewidth=1, alpha=0.5)
@@ -564,7 +563,6 @@ with col_chart:
         # Predicción (hipotética): proyección simple del último valor
         # Si el modelo predijo BUY, asumimos subida; SELL, asumimos bajada
         last_price = hist_prices[-1]
-        price_range = hist_prices.max() - hist_prices.min()
         trend = 0.05 if label == "BUY" else -0.05
         pred_prices = np.linspace(last_price, last_price * (1 + trend), len(real_prices))
         pred_color = UP if label == "BUY" else DOWN
