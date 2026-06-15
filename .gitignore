@@ -7,11 +7,11 @@ wheels/
 *.egg-info
 
 # Datasets de imágenes (se regeneran con src/generate_dataset.py)
-dataset_stft/
-dataset_wavelet/
+dataset_stft/**.png
+dataset_wavelet/**.png
 
 # Modelos entrenados (se comparten por link a Drive — ver README)
-models/
+
 
 # Artefactos de LaTeX
 paper/*.aux

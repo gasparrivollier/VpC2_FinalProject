@@ -1,0 +1,56 @@
+{
+  "dataset": "STFT",
+  "generated_at": "2026-06-13T05:52:30.616741",
+  "start_date": "2021-01-01",
+  "train_end": "2025-12-31",
+  "test_start": "2026-01-01",
+  "window_days": 90,
+  "img_size": 92,
+  "horizons": [
+    3,
+    7,
+    15,
+    30
+  ],
+  "atr_config": {
+    "period": 14,
+    "buy_multiplier": 0.7,
+    "sell_multiplier": 0.7
+  },
+  "asset_classes": [
+    "crypto",
+    "stocks",
+    "commodities"
+  ],
+  "asset_universe": {
+    "crypto": [
+      "BTC-USD",
+      "ETH-USD",
+      "SOL-USD",
+      "XRP-USD",
+      "ADA-USD"
+    ],
+    "stocks": [
+      "AAPL",
+      "MSFT",
+      "GOOGL",
+      "SPY",
+      "NVDA",
+      "KO",
+      "TSLA",
+      "AMD",
+      "META",
+      "NFLX"
+    ],
+    "commodities": [
+      "GC=F",
+      "SI=F",
+      "CL=F"
+    ]
+  },
+  "transform_config": {
+    "stft_window": 32,
+    "stft_overlap": 28,
+    "nfft": 64
+  }
+}
