@@ -432,6 +432,12 @@ with st.sidebar:
         st.caption(f"Python activo: {sys.executable}")
         if TORCH_ERROR:
             st.caption(f"Detalle import torch: {TORCH_ERROR}")
+        if not TORCH_OK:
+            st.info(
+                "Instalá PyTorch en este entorno:\n"
+                f"`{sys.executable} -m pip install torch torchvision --index-url "
+                "https://download.pytorch.org/whl/cpu`"
+            )
 
     st.markdown('<div class="mono">market</div>', unsafe_allow_html=True)
     market = st.pills("Market", list(TICKER_MAP.keys()),
@@ -452,8 +458,30 @@ with st.sidebar:
     
     test_date = None
     if test_mode:
-        test_date = st.date_input("Fecha de test", value=datetime.now() - timedelta(days=60),
-                                  label_visibility="collapsed")
+        if "test_date_value" not in st.session_state:
+            st.session_state["test_date_value"] = (datetime.now() - timedelta(days=60)).date()
+
+        test_date = st.date_input(
+            "Fecha de test",
+            value=st.session_state["test_date_value"],
+            label_visibility="collapsed",
+        )
+
+        # Sincroniza cambios manuales del date_input con el estado lógico.
+        if test_date != st.session_state["test_date_value"]:
+            st.session_state["test_date_value"] = test_date
+
+        prev_col, next_col = st.columns(2)
+        with prev_col:
+            if st.button("-7 dias", use_container_width=True, key="btn_test_date_minus_7"):
+                st.session_state["test_date_value"] = st.session_state["test_date_value"] - timedelta(days=7)
+                st.rerun()
+        with next_col:
+            if st.button("+7 dias", use_container_width=True, key="btn_test_date_plus_7"):
+                st.session_state["test_date_value"] = st.session_state["test_date_value"] + timedelta(days=7)
+                st.rerun()
+
+        test_date = st.session_state["test_date_value"]
 
     run = st.button("⚡ Run prediction", type="primary", use_container_width=True)
 
