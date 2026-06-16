@@ -5,8 +5,29 @@ build/
 dist/
 wheels/
 *.egg-info
-dataset_stft/**
-dataset_wavelet/**
+
+# Datasets (se guardan en Drive, no en el repo)
+dataset_stft/images/
+dataset_wavelet/images/
+dataset_stft/**/*.png
+dataset_wavelet/**/*.png
+
+# Datasets comprimidos
+dataset_stft/**/*.7z
+dataset_wavelet/**/*.7z
+*.7z
+
+# Modelos entrenados (se comparten por link a Drive — ver README)
+
+
+# Artefactos de LaTeX
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.synctex.gz
+paper/*.toc
+paper/*.bbl
+paper/*.blg
 
 # Virtual environments
 .venv

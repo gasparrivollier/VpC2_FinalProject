@@ -49,16 +49,16 @@ warnings.filterwarnings("ignore")
 
 ASSET_UNIVERSE = {
     "crypto": [
-        "BTC-USD", "ETH-USD", "SOL-USD",
+        "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD"
     ],
     "stocks": [
-        "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA","SPY",
+        "AAPL", "MSFT", "GOOGL", "SPY", "NVDA", "KO", "TSLA", "AMD", "META", "NFLX"
     ],
     "commodities": [
-        "GC=F", "SI=F",
+        "GC=F", "SI=F", "CL=F"
     ],
     "fx": [
-        "EURUSD=X", "GBPUSD=X",
+        "EURUSD=X",
     ],
 }
 
@@ -67,11 +67,11 @@ ASSET_UNIVERSE = {
 # ═════════════════════════════════════════════════════════════════════════════
 
 HORIZONS    = [3, 7, 15, 30]
-WINDOW_DAYS = 60        # días de historia para cada muestra
-IMG_SIZE    = 64        # píxeles de salida
+WINDOW_DAYS = 90        # días de historia para cada muestra
+IMG_SIZE    = 92        # píxeles de salida
 CMAP        = "magma"
 PAD_LENGTH  = 16        # días de padding por reflexión
-START_DATE  = "2022-01-01"
+START_DATE  = "2021-01-01"
 TRAIN_END   = "2025-12-31"
 TEST_START  = "2026-01-01"
 MIN_HISTORY = 200       # mínimo de días para procesar un activo
@@ -94,8 +94,8 @@ WAVELET_CFG = {
 
 ATR_CFG = {
     "period":           14,
-    "buy_multiplier":  1.3,
-    "sell_multiplier": 1.3,
+    "buy_multiplier":  0.7,
+    "sell_multiplier": 0.7,
 }
 
 
