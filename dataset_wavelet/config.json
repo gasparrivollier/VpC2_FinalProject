@@ -1,0 +1,75 @@
+{
+  "dataset": "Wavelet",
+  "generated_at": "2026-05-31T03:03:15.100997",
+  "start_date": "2018-01-01",
+  "train_end": "2025-12-31",
+  "test_start": "2026-01-01",
+  "window_days": 60,
+  "img_size": 64,
+  "horizons": [
+    1,
+    5,
+    10,
+    20,
+    30
+  ],
+  "atr_config": {
+    "period": 14,
+    "buy_multiplier": 1.5,
+    "sell_multiplier": 1.5
+  },
+  "asset_classes": [
+    "crypto",
+    "stocks",
+    "commodities",
+    "fx"
+  ],
+  "asset_universe": {
+    "crypto": [
+      "BTC-USD"
+    ],
+    "stocks": [
+      "AAPL"
+    ],
+    "commodities": [
+      "GC=F"
+    ],
+    "fx": [
+      "EURUSD=X"
+    ]
+  },
+  "transform_config": {
+    "wavelet": "cmor1.5-1.0",
+    "scales": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30
+    ]
+  }
+}
