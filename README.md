@@ -1,4 +1,4 @@
-# SpectraTrade — Clasificación de régimen de mercado vía representaciones tiempo-frecuencia
+# Proyecto final CV2 CEIA - Clasificación de régimen de mercado vía representaciones tiempo-frecuencia
 
 Predicción de señales de *trading* (**BUY / HOLD / SELL**) convirtiendo series
 de precios en imágenes tiempo-frecuencia (espectrograma **STFT** y escalograma
