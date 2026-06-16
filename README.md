@@ -12,6 +12,18 @@ Artificial (FIUBA / CEIA).
 
 ## 🎯 Resultados principales
 
+### Experimento final — clasificación binaria (BUY vs SELL, STFT, horizonte 30d)
+
+| Modelo | Test Acc | **F1-macro** | Params |
+|--------|:--------:|:------------:|-------:|
+| **CNN custom (v1)** | **61.30%** | **0.613** 🏆 | 1.45M |
+| ResNet-18 | 53.25% | 0.532 | 11.2M |
+| CNN v2 | 52.40% | 0.520 | 1.19M |
+| EfficientNet-B0 | 50.34% | 0.478 | 4.17M |
+| *Azar (2 clases)* | 50.0% | 0.500 | — |
+
+### Experimento previo — clasificación ternaria (BUY / HOLD / SELL, STFT + Wavelet)
+
 | Modelo | Repr. | Test Acc | Bal-Acc | **F1-macro** | Params |
 |--------|-------|:--------:|:-------:|:------------:|-------:|
 | **ResNet-18** | **STFT** | 62.3% | 37.4% | **0.369** 🏆 | 11.2M |
@@ -20,7 +32,7 @@ Artificial (FIUBA / CEIA).
 | CNN propia | Wavelet | 16.6% | 38.0% | 0.167 | 1.45M |
 | *Azar (3 clases)* | — | 33.3% | 33.3% | 0.333 | — |
 
-Métrica principal: **F1-macro** / **balanced-accuracy** (no accuracy cruda, por fuerte desbalance de clases).
+Métrica principal: **F1-macro** (no accuracy cruda, por desbalance de clases).
 Gráficos y tablas en [`resultados/`](resultados/).
 
 ---
@@ -201,9 +213,10 @@ python src/predict.py --help
 
 ## 📊 Datasets y modelos entrenados
 
-- **Modelos (.pth):** no versionados por tamaño. Colocar en `models/` los archivos:
-  `resnet_best.pth`, `efficientnet_best.pth`, `cnn_best_v1.pth`, `cnn_best_v2.pth`.
-- **Datasets de imágenes:** no versionados. Regenerar con `src/generate_dataset.py`
+- **Modelos (.pth) y datasets:** no versionados en el repositorio por tamaño.
+  Disponibles en [Google Drive](https://drive.google.com/drive/u/0/folders/1rGp7yx1szeQyzjXx6y3OUwjwf3MLfiOX).
+  Descargar y colocar los `.pth` en `models/` y los datasets en `dataset_stft/` / `dataset_wavelet/`.
+- **Alternativamente**, los datasets se pueden regenerar con `src/generate_dataset.py`
   o la celda correspondiente del notebook.
 - **Resultados:** [`resultados/`](resultados/) — `tabla_comparativa.csv`,
   `barrido_horizontes.csv`.
